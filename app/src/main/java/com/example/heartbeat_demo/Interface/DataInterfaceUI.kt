@@ -436,6 +436,13 @@ fun analyzeAudioData(pcmData: ByteArray, barCount: Int, previousBarHeights: List
     return barHeights
 }
 
+/**
+ * Connection Status Section displays the current Bluetooth connection state.
+ * 
+ * This status is based on the underlying Bluetooth GATT connection state,
+ * NOT on heartbeat packet responses. The connection status updates immediately
+ * when the GATT connection state changes.
+ */
 @Composable
 fun ConnectionStatusSection(dataInterfaceViewModel: dataInterfaceViewModel) {
 
@@ -452,6 +459,12 @@ fun ConnectionStatusSection(dataInterfaceViewModel: dataInterfaceViewModel) {
         Text(
             text = if (isConnected) "Connected" else "Not Connected",
             color = if (isConnected) Color.Green else Color.Red
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "(GATT Status)",
+            color = Color.Gray,
+            fontSize = 12.sp
         )
     }
 }

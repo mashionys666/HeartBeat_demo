@@ -30,6 +30,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+/**
+ * DeviceConnectionViewModel handles Bluetooth device connection and communication.
+ * 
+ * Connection Management Approach:
+ * - Uses standard Bluetooth GATT connection state tracking
+ * - Does NOT implement automatic heartbeat packets
+ * - Does NOT include periodic communication health checks
+ * 
+ * This design choice ensures:
+ * - Lower power consumption
+ * - Reduced network traffic
+ * - Simplified connection state management
+ * - Better compatibility with various devices
+ * 
+ * Connection status is reliable through GATT connection state callbacks.
+ */
 class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
     private  val TAG = "DeviceConnectionViewModel"
 
@@ -224,6 +240,10 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
                     scope.launch(Dispatchers.Main) {
                         _connectedDevice.value = gatt?.device
                         _isConnected.value = true
+                        
+                        // Note: We do NOT start heartbeat here intentionally.
+                        // Connection status is managed through GATT connection state only.
+                        
                         // Set the preferred PHY to LE Coded PHY after connection
                         if (gatt?.device?.type == BluetoothDevice.DEVICE_TYPE_LE) {
                             Log.i(TAG, "LE Coded PHY is supported.")
@@ -428,6 +448,11 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
         }
     }
 
+    /**
+     * Clean-up method for the ViewModel.
+     * Disconnects from Bluetooth device and closes GATT connection.
+     * Note: No heartbeat cleanup needed as heartbeat functionality is not implemented.
+     */
     @SuppressLint("MissingPermission")
     override fun onCleared() {
         super.onCleared()
