@@ -19,7 +19,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
-import androidx.compose.ui.input.key.type
+
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -89,8 +89,9 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
     private val _isConnected = MutableLiveData<Boolean>(false)
     val isConnected: LiveData<Boolean> = _isConnected
 
-
-    private val scope = viewModelScope
+    // Permission state management
+    private val _permissionsGranted = MutableLiveData<Boolean>(false)
+    val permissionsGranted: LiveData<Boolean> = _permissionsGranted
     // Service and Characteristic UUIDs
     private val SERVICE_UUID = UUID.fromString(
         "a6ed0301-d344-460a-8075-b9e8ec90d71b")
@@ -100,11 +101,43 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
         "00002902-0000-1000-8000-00805f9b34fb")
 
     init {
+        checkPermissions()
         initializeBluetooth()
+    }
+
+    fun checkPermissions(): Boolean {
+        val allGranted = getRequiredPermissions().all {
+            ActivityCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        _permissionsGranted.value = allGranted
+        return allGranted
+    }
+
+    fun getRequiredPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.BLUETOOTH,
+                Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun initializeBluetooth() {
+        if (!checkPermissions()) {
+            Log.w(TAG, "Bluetooth permissions not granted, cannot initialize")
+            return
+        }
+        
         val bluetoothAdapter = bluetoothManager.adapter
         _isBluetoothEnabled.value = bluetoothAdapter?.isEnabled ?: false
         if (bluetoothAdapter?.isEnabled == true) {
@@ -113,19 +146,40 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
     }
 
     @SuppressLint("MissingPermission")
-     fun getPairedDevices() {
-            if (ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.BLUETOOTH_CONNECT
-            ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                val pairedDevices = bluetoothManager.adapter.bondedDevices.toList()
-                _pairedDevices.value = pairedDevices
+    fun getPairedDevices() {
+        if (!checkPermissions()) {
+            Log.w(TAG, "Cannot get paired devices: permissions not granted")
+            return
+        }
+        
+        val pairedDevices = bluetoothManager.adapter.bondedDevices.toList()
+        _pairedDevices.value = pairedDevices
+    }
+
+    fun onPermissionsChanged() {
+        Log.d(TAG, "Permissions state changed, re-checking...")
+        if (checkPermissions()) {
+            Log.d(TAG, "Permissions granted, initializing Bluetooth")
+            initializeBluetooth()
+        } else {
+            Log.w(TAG, "Permissions not granted, Bluetooth functionality disabled")
+            // Clear any existing state that requires permissions
+            _pairedDevices.value = emptyList()
+            _availableDevices.value = emptyList()
+            _isScanning.value = false
+            if (_isConnected.value == true) {
+                disconnectFromDevice()
             }
+        }
     }
 
     @SuppressLint("MissingPermission")
     fun connectToDevice(device: BluetoothDevice) {
+        if (!checkPermissions()) {
+            Log.e(TAG, "Cannot connect to device: permissions not granted")
+            return
+        }
+        
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 bluetoothGatt?.disconnect()
@@ -144,24 +198,26 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
     @SuppressLint("MissingPermission")
     fun disconnectFromDevice() {
         Log.d(TAG, "disconnectFromDevice called")
-        if (ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.BLUETOOTH_CONNECT
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            try {
-                bluetoothGatt?.disconnect()
-            } catch (e: SecurityException) {
-                Log.e(TAG, "SecurityException during disconnect: ${e.message}")
-            }
-        } else {
-            Log.e(TAG, "BLUETOOTH_CONNECT permission not granted, cannot disconnect")
+        if (!checkPermissions()) {
+            Log.e(TAG, "Cannot disconnect from device: permissions not granted")
+            return
+        }
+        
+        try {
+            bluetoothGatt?.disconnect()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException during disconnect: ${e.message}")
         }
         _connectedDevice.value = null
     }
 
     @SuppressLint("MissingPermission")
     fun startDiscovery() {
+        if (!checkPermissions()) {
+            Log.e(TAG, "Cannot start discovery: permissions not granted")
+            return
+        }
+        
         if (bluetoothAdapter?.isDiscovering == true) {
             bluetoothAdapter!!.cancelDiscovery()
         }
@@ -180,7 +236,7 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
             bluetoothLeScanner.startScan(null, settings, scanCallback)
 
             // Stop scanning after 25 seconds
-            scope.launch {
+            viewModelScope.launch {
                 delay(25000) // 25 seconds
                 stopDiscovery()
             }
@@ -188,7 +244,7 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
             // Fallback to old method if BluetoothLeScanner is not available
             bluetoothAdapter?.startDiscovery()
             _isScanning.value = true
-            scope.launch {
+            viewModelScope.launch {
                 delay(25000) // 25 seconds
                 stopDiscovery()
             }
@@ -221,7 +277,7 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     Log.i(TAG, "Connected to GATT server. Device address: $deviceAddress")
-                    scope.launch(Dispatchers.Main) {
+                    viewModelScope.launch(Dispatchers.Main) {
                         _connectedDevice.value = gatt?.device
                         _isConnected.value = true
                         // Set the preferred PHY to LE Coded PHY after connection
@@ -252,7 +308,7 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
                     _isConnected.postValue(false)
                     if (status == 133 && retryCount < MAX_RETRIES) {
                         retryCount++
-                        scope.launch {
+                        viewModelScope.launch {
                             delay(RETRY_DELAY_MS)
                             Log.w(TAG, "Retrying connection attempt $retryCount")
                             connectToDevice(gatt!!.device)
@@ -308,7 +364,7 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
             }
             requestConnectionPriority(gatt)
             // Request MTU after services are discovered
-            scope.launch(Dispatchers.Main) {
+            viewModelScope.launch(Dispatchers.Main) {
                 delay(500) //Short delay before MTU request
                 val mtuSuccess = gatt?.requestMtu(247) ?: false
                 Log.d(TAG, "MTU request initiated: $mtuSuccess")

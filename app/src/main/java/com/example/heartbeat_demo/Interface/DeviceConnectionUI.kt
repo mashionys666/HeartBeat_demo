@@ -1,6 +1,5 @@
 package com.example.heartbeat_demo.Interface
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattService
@@ -74,39 +73,20 @@ fun DeviceConnectionUI(
     val isBluetoothEnabled by deviceConnectionViewModel.isBluetoothEnabled.observeAsState(false)
     val connectedDevice by deviceConnectionViewModel.connectedDevice.observeAsState()
     val discoveredServices by deviceConnectionViewModel.discoveredServices.observeAsState(emptyMap())
+    
+    // Use ViewModel's permission state
+    val permissionsGranted by deviceConnectionViewModel.permissionsGranted.observeAsState(false)
 
-    // State to track if permissions are granted
-    var permissionsGranted by remember { mutableStateOf(false) }
-
-    //Permission
-    val bluetoothPermissions = if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        arrayOf(
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-    }else {
-        arrayOf(
-            Manifest.permission.BLUETOOTH,
-            Manifest.permission.BLUETOOTH_ADMIN,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-    }
+    //Permission - Use ViewModel's permission logic
+    val bluetoothPermissions = deviceConnectionViewModel.getRequiredPermissions()
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
         onResult = { permissions ->
             Log.d("DeviceConnectionUI", "permissionLauncher onResult called")
             val allGranted = permissions.values.all { it }
-            if (allGranted) {
-                Log.d("DeviceConnectionUI", "All permissions granted")
-                permissionsGranted = true
-                deviceConnectionViewModel.initializeBluetooth()
-            } else {
-                Log.e("DeviceConnectionUI", "Permissions not granted")
-                permissionsGranted = false
-            }
+            Log.d("DeviceConnectionUI", "All permissions granted: $allGranted")
+            // Use the new centralized permission change handler
+            deviceConnectionViewModel.onPermissionsChanged()
         }
     )
     LaunchedEffect(key1 = true) {
@@ -121,9 +101,9 @@ fun DeviceConnectionUI(
             Log.d("DeviceConnectionUI", "permissionLauncher.launch called")
         } else {
             Log.d("DeviceConnectionUI", "Permissions already granted")
-            permissionsGranted = true
-            deviceConnectionViewModel.initializeBluetooth()
-            Log.d("DeviceConnectionUI", "initializeBluetooth called")
+            // Use the centralized permission change handler
+            deviceConnectionViewModel.onPermissionsChanged()
+            Log.d("DeviceConnectionUI", "onPermissionsChanged called")
         }
     }
 
@@ -191,19 +171,11 @@ fun DeviceConnectionUI(
                     availableDevices = availableDevices,
                     isScanning = isScanning,
                     onScanToggle = { scanning ->
-                        Log.d("DeviceConnectionUI", "permissionsGranted: $permissionsGranted")
-                        if (permissionsGranted) {
-                            if (scanning) {
-                                Log.d("DeviceConnectionUI", "startDiscovery called")
-                                deviceConnectionViewModel.startDiscovery()
-                            } else {
-                                deviceConnectionViewModel.stopDiscovery()
-                            }
+                        if (scanning) {
+                            Log.d("DeviceConnectionUI", "startDiscovery called")
+                            deviceConnectionViewModel.startDiscovery()
                         } else {
-                            Log.e(
-                                "DeviceConnectionUI",
-                                "Permissions not granted, cannot start scan"
-                            )
+                            deviceConnectionViewModel.stopDiscovery()
                         }
                     },
                     onDeviceClick = { device ->
