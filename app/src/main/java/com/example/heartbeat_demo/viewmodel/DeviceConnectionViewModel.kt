@@ -106,7 +106,15 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
     }
 
     fun checkPermissions(): Boolean {
-        val bluetoothPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val allGranted = getRequiredPermissions().all {
+            ActivityCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        _permissionsGranted.value = allGranted
+        return allGranted
+    }
+
+    fun getRequiredPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
@@ -121,12 +129,6 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
         }
-
-        val allGranted = bluetoothPermissions.all {
-            ActivityCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-        _permissionsGranted.value = allGranted
-        return allGranted
     }
 
     @SuppressLint("MissingPermission")
@@ -152,6 +154,23 @@ class DeviceConnectionViewModel(private val context: Context) :ViewModel(){
         
         val pairedDevices = bluetoothManager.adapter.bondedDevices.toList()
         _pairedDevices.value = pairedDevices
+    }
+
+    fun onPermissionsChanged() {
+        Log.d(TAG, "Permissions state changed, re-checking...")
+        if (checkPermissions()) {
+            Log.d(TAG, "Permissions granted, initializing Bluetooth")
+            initializeBluetooth()
+        } else {
+            Log.w(TAG, "Permissions not granted, Bluetooth functionality disabled")
+            // Clear any existing state that requires permissions
+            _pairedDevices.value = emptyList()
+            _availableDevices.value = emptyList()
+            _isScanning.value = false
+            if (_isConnected.value == true) {
+                disconnectFromDevice()
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
